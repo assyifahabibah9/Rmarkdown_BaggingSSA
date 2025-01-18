@@ -1,0 +1,307 @@
+---
+title: "**PENGGUNAAN PENDEKATAN *BOOTSTRAP AGGREGATING SINGULAR SPECTRUM ANALYSIS* UNTUK MENINGKATKAN AKURASI PERAMALAN HARGA SAHAM PT BANK CENTRAL ASIA (BCA)**"
+output:
+  html_document:
+    toc: yes
+    toc_float: yes
+    theme: cerulean
+    higlight: kate
+  pdf_document:
+    toc: yes
+---
+
+<style>
+  .title {
+    text-align: center;
+  }
+</style>
+  
+<style>
+  .author {
+    text-align: center;
+  }
+</style>
+  
+<style>
+  .date {
+    text-align: center;
+  }
+</style>
+
+# **PENDAHULUAN**
+
+Metode SSA dikombinasikan dengan bagging berbasis *K-Means clustering* (bagging-SSA) untuk meningkatkan akurasi peramalan harga saham BCA. Teknik bagging yang digabungkan dengan *K-Means clustering* bertujuan mengurangi variansi model dan meningkatkan stabilitas prediksi dengan membagi data ke dalam kelompok yang lebih homogen. Sebagai perbandingan, metode ARIMA juga diterapkan untuk mengevaluasi kinerja bagging-SSA.
+
+# **PEMBAHASAN**
+
+## **Data**
+
+```{r}
+library(readxl)
+library(clusterCrit)
+library(forecast)
+library(data.table)
+library(ggplot2)
+library(readr)
+library(openxlsx)
+library(writexl)
+library(Rssa)
+library(readxl)
+
+data <- read_excel("D:/data BCA.xlsx")
+View(data)
+```
+
+```{r}
+# Load the data
+set.seed(123)  
+total_data <- nrow(data)
+total_data
+```
+
+```{r}
+training_size <- floor((72/84) * total_data)
+training_size
+```
+
+```{r}
+testing_size <- total_data - training_size
+testing_size
+```
+
+```{r}
+# Data training dan testing
+datrain0 <- data[1:training_size, ]
+datest <- data[(training_size + 1):total_data, ]
+datrain<- data.frame(datrain0)
+datrain
+```
+
+### ***Preprocessing***
+
+```{r}
+# Check for missing values and display a message
+if (sum(is.na(datrain)) > 0) {
+  cat("Data contains missing values. Missing values will be removed.\n")
+  data_saham <- na.omit(data_saham)
+  cat("Missing values have been removed.\n")
+} else {
+  cat("No missing values found in the data.\n")
+}
+
+```
+
+### ***Konversi Data Dalam Time Series***
+```{r}
+# Mengonversi 7 kolom ke dalam time series, misalnya dengan frekuensi bulanan (12)
+ts_price <- ts(datrain[2])
+ts_price
+
+```
+
+## **KM.N Clustering**
+
+### ***Nama Cluster***
+```{r}
+KMboot.norm <- function(x, num = 10, k_range = c(12,20)) {
+  freq <- frequency(x)
+  x_clust <- data.matrix(x)
+  
+  if (sd(x) == 0) {
+    km_res <- rep(1, length(x))
+  } else {
+    km_res <- cluster::pam(x_clust, k = k_range[1])$cluster  # Using PAM as an alternative
+    km_res
+  }}
+
+
+k <-KMboot.norm(ts_price) 
+k
+
+```
+
+### ***Nilai Mean per Cluster***
+```{r}
+KMboot.norm <- function(x, num = 100, k_range = c(12,20)) {
+  
+  freq <- frequency(x)
+  x_clust <- data.matrix(x)
+  
+  if (sd(x) == 0) {
+    km_res <- rep(1, length(x))
+  } else {
+    km_res <- cluster::pam(x_clust, k_range[1])$cluster
+  }
+  
+  clus_means <- sapply(sort(unique(km_res)), function(i) mean(x[km_res == i]))
+  
+}
+clusmeans <- KMboot.norm(ts_price)
+clusmeans
+
+```
+
+### ***Standar Deviasi per Cluster***
+```{r}
+KMboot.norm <- function(x, num = 100, k_range = c(12, 20)) {
+  freq <- frequency(x)
+  x_clust <- data.matrix(x)
+  
+  # Periksa apakah standar deviasi adalah nol
+  if (sd(x) == 0) {
+    km_res <- rep(1, length(x))
+  } else {
+  # Gunakan jumlah cluster yang diinginkan
+    km_res <- cluster::pam(x_clust, 12)$cluster
+  }
+  
+  # Hitung rata-rata dan standar deviasi untuk tiap cluster
+  clus_means <- sapply(sort(unique(km_res)), function(i) mean(x[km_res == i]))
+  clus_sd <- sapply(sort(unique(km_res)), function(i) sd(x[km_res == i]))
+  
+  # Kembalikan hasil
+  list(cluster_means = clus_means, cluster_sd = clus_sd, clusters = km_res)
+}
+
+# Panggil fungsi dengan data
+result <- KMboot.norm(ts_price)
+result$cluster_sd
+
+```
+
+
+## **BAGGING**
+```{r}
+KMboot.norm <- function(x, num = 10, k_range = c(12,20)) {
+  freq <- frequency(x)
+  x_clust <- data.matrix(x)
+  
+  if (sd(x) == 0) {
+    km_res <- rep(1, length(x))
+  } else {
+    km_res <- cluster::pam(x_clust, k = k_range[1])$cluster  # Using PAM as an alternative
+  }
+  
+  clus_means <- sapply(sort(unique(km_res)), function(i) mean(x[km_res == i]))
+  clus_means
+  
+  clus_sd <- sapply(sort(unique(km_res)), function(i) sd(x[km_res == i]))
+  
+  xs <- list()
+  xs[[1]] <- ts(x, freq = freq)
+  
+  for (j in 2:num) {
+    xs[[j]] <- vector(length = length(x))
+    for (i in 1:length(x)) {
+      xs[[j]][i] <- rnorm(1, mean = clus_means[km_res[i]], sd = clus_sd[km_res[i]])
+    }
+    xs[[j]] <- ts(xs[[j]], freq = freq)
+  }
+  
+  return(xs)
+}
+
+datbag<-KMboot.norm(ts_price) 
+datbag
+
+frame_datbag <- as.data.frame(datbag)
+frame_datbag
+
+write.xlsx(frame_datbag, "D:/Dataoutputbagging.xlsx")
+
+```
+
+
+### ***Convert Data Bagging***
+```{r}
+# Convert the bagging list into a data frame with 10 columns
+library(readxl)
+daging <- read_excel("D:/DataBagging.xlsx", 
+    col_names = FALSE)
+View(daging)
+
+frame_daging <- as.data.frame(do.call(cbind, daging))
+frame_daging
+```
+
+
+##**Foecast Bagging ARIMA**
+```{r}
+# Function to forecast ARIMA for each column in the data frame
+forecast_arima_per_column <- function(frame_daging, h = 12) {
+  forecasts <- lapply(frame_daging, function(column) {
+    ts_data <- ts(column, frequency = 12)
+    model <- auto.arima(ts_data)
+    forecast(model, h = h)$mean
+  })
+  forecast_df <- do.call(cbind, forecasts)
+  return(forecast_df)
+}
+
+# Perform forecasting ARIMA for each column
+forecast_results <- forecast_arima_per_column(frame_daging)
+forecast_results
+
+# Create a data frame for the forecast results
+forecast_results_df <- data.frame(
+  forecast_results
+)
+
+# Save the forecast results to Excel
+write.xlsx(forecast_results_df, "D:/Dataoutput_forecast_per_column.xlsx")
+
+```
+
+
+## **Forecast Bagging SSA**
+### ***Menampilkan Plot Eigenvalue dan Nilai Singular***
+```{r}
+ssaAPB=ssa(daging,36)
+plot(ssaAPB)
+```
+
+```{r}
+ssaAPB$sigma
+```
+### ***Menampilkan plot 2D Eigenvector***
+```{r}
+plot(ssaAPB, type= 'paired')
+```
+
+### ***Menampilkan Plot W-correlation Matrix***
+```{r}
+plot(wcor(ssaAPB))
+```
+
+### ***Hasil korelasi antar Kelompok***
+```{r}
+
+plot(wcor(ssaAPB,groups=list(c(1:9),c(10:36))))
+```
+
+```{r}
+
+ramalAPB=rforecast(ssaAPB,groups=list(c(1:9)), len=12)
+ramalAPB
+
+SSA_bag<-data.frame(ramalAPB)
+write_xlsx(SSA_bag,"D:/Dataoutput_forecast_bagging_SSA.xlsx")
+
+```
+
+
+## **Forecast**
+```{r}
+library(readxl)
+SSA_Bagging <- read_excel("D:/Dataoutput_forecast_bagging_SSA.xlsx")
+View(SSA_Bagging)
+
+ssaAPF=ssa(SSA_Bagging,6)
+ramalAPF=rforecast(ssaAPF,groups=list(c(1:3)), len=12)
+ramalAPF
+SSA_2025<-data.frame(ramalAPF)
+write_xlsx(SSA_2025,"D:/Dataoutput_forecast_bagging_SSA_2025.xlsx")
+```
+
+
+
